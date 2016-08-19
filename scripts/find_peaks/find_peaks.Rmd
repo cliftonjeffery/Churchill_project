@@ -1,0 +1,177 @@
+---
+title: "find_peaks"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This code takes a wide set of qtl scans and coefficient scans and extracts meaningful peaks and phenotypes from them.  Because of this, to work with this code you will need a data frame with qtl scans for each phenotype, and for some of the tests a matrix of coefficient scans as well.
+
+```{r, eval=FALSE}
+add <- find_peaks(allscan1.add, threshold = 7)
+intsex <- find_peaks(allscan1.intsex, threshold = 9)
+intdiet <- find_peaks(allscan1.intdiet, threshold = 9)
+difsex <- find_peaks(allscan1.difsex, threshold = 6)
+difdiet <- find_peaks(allscan1.difdiet, threshold = 6)
+```
+
+First we find the peaks for each of the qtl scans, the dif scans just containing the interactive scan's lod scores minus the additive scan's lod scores.  This will create a list of each chromosome for each phenotype that has a qtl peak above the threshold.  The threshold values should be changed based on permutations run, though the thresholds provided are probably good estimates.
+
+```{r, eval=FALSE}
+intpeaks.sex <- data.frame()
+x <- 1
+while(x < (nrow(intsex) + 1)){
+  index <- grep(intsex[x,2], intsex[,2])
+  for(i in grep(intsex[x,2], difsex[,2])){
+    for(j in index){
+      if((as.character(intsex[j,3]) == as.character(difsex[i,3])) &                         as.numeric(intsex[j,4]) < 
+           (as.numeric(difsex[i,4]) + 5) & 
+           as.numeric(intsex[j,4]) > (as.numeric(difsex[i,4]) - 5)){
+        insert <- cbind(intsex[j,2], intsex[j,3])
+        intpeaks.sex <- rbind(intpeaks.sex, insert)
+      }
+    }
+  }
+  x <- index[length(index)] + 1
+}
+```
+
+This first while loop compares the peaks in the interaction scans with the peaks meant to find the interactive peaks that are significant in and of themselves instead of just reflecting an additive peak.  These peaks are stored in intpeaks.sex.
+
+```{r, eval=FALSE}
+intpeaks.diet <- data.frame()
+x <- 1
+while(x < (nrow(intdiet) + 1)){
+  index <- grep(intdiet[x,2], intdiet[,2])
+  for(i in grep(intdiet[x,2], difdiet[,2])){
+    for(j in index){
+      if((as.character(intdiet[j,3]) == as.character(difdiet[i,3])) & as.numeric(intdiet[j,4]) < 
+         (as.numeric(difdiet[i,4]) + 5) & 
+         as.numeric(intdiet[j,4]) > (as.numeric(difdiet[i,4]) - 5)){
+        insert <- cbind(intdiet[j,2], intdiet[j,3])
+        intpeaks.diet <- rbind(intpeaks.diet, insert)
+      }
+    }
+  }
+  x <- index[length(index)] + 1
+}
+```
+
+This while loop just serves to do the same thing as above with the diet interactive model instead of the sex interactive.  The peaks are stored in intpeaks.both.
+
+```{r, eval=FALSE}
+intpeaks.both <- data.frame()
+for(i in 1:nrow(intpeaks.sex)){
+  index <- grep(intpeaks.sex[i,1], intpeaks.diet[,1])
+
+  if(length(index) != 0){# & length(grep(intpeaks.sex[i,2],                           intpeaks.diet[index,2])) != 0){
+    insert <- cbind(as.character(intpeaks.sex[i,1]))
+    intpeaks.both <- rbind(intpeaks.both, insert)
+  }
+}
+```
+
+This code chunk finds phenotypes that are in both intpeaks.sex and intpeaks.diet.  The commented code finds if the peaks are on the same chromosome, though sometimes this yields nothing.  These phenotypes are stores in intpeaks.both.
+
+```{r, eval=FALSE}
+intpeaks.noadd.samepos <- data.frame()
+for(i in 1:nrow(intsex)){
+  index.diet <- grep(intsex[i,2], intdiet[,2])
+  index.add <- grep(intsex[i,2], add[,2])
+  for(j in index.diet){
+    if(intsex[i,3] == intdiet[j,3] & 
+       as.numeric(intdiet[j,4]) < (as.numeric(intsex[i,4]) + 5) & 
+       as.numeric(intdiet[j,4]) > (as.numeric(intsex[i,4]) - 5) &
+       length(grep(intsex[i,3], add[index.add,3])) == 0){
+      insert <- cbind(intsex[i,2], intsex[i,3])
+      intpeaks.noadd.samepos <- rbind(intpeaks.noadd.samepos, insert)
+    }
+  }
+}
+```
+
+This loop finds significant peaks in another way, by just comparing the interactive models to the additive models and finding interactive peaks that don't have a corresponding additive peak.  This loop checks for significant peaks in both interactive models that don't have a corresponding additive peak.  It will only output phenotypes that have the interactive peaks both on the same chromosome.  It outputs these phenotypes in intpeaks.noadd.samepos.
+
+```{r, eval=FALSE}
+intpeaks.noadd <- data.frame()
+for(i in 1:nrow(intsex)){
+  index.diet <- grep(intsex[i,2], intdiet[,2])
+  index.add <- grep(intsex[i,2], add[,2])
+  for(j in index.diet){
+    if(intsex[i,3] == intdiet[j,3] & 
+       length(grep(intsex[i,3], add[index.add,3])) == 0){
+      insert <- cbind(intsex[i,2], intsex[i,3])
+      intpeaks.noadd <- rbind(intpeaks.noadd, insert)
+    }
+  }
+}
+```
+
+This chunk does the same thing as the above chunk, but the peaks for the interactive models don't have to be on the same peak.
+
+```{r, eval=FALSE}
+coef_jumps_intsex <- data.frame()
+for(i in 1:length(allcoef.intsex)){
+  for (j in 1:19) {
+    point <- bayes_int(allscan1.intsex[,i], chr = j)[1,2]
+    marker <- find_marker(allscan1.intsex$map, chr = j, pos = point)
+    sort <- allcoef.intsex[[i]][[j]]$coef[marker,13:19]
+    sort <- sort(sort)
+    for(k in 1:6){
+      dif <- sort[k+1] - sort[k]
+      if(dif > 2){
+        insert <- cbind(names(allcoef.add)[i], j, dif)
+        coef_jumps_intsex <- rbind(coef_jumps_intsex, insert)
+      }
+    }
+  }
+}
+```
+
+At this point you'll need coefficient scans as we are trying to find phenotypes that exhibit a clear separation at some point in their coefficient scans.  To do this, we extract the coefficient values at the peak of each chromosome, order the list, and then run through looking for any separation.  This loop looks at the interactive coefficient values for interactive scans, but that can easily by changing 13:19 to 1:8.  The jump threshold is arbitrary, as I was never able to run permutations for the coefficients.  The threshold can be changed in the final if statement, checking if dif is larger than the threshold. These phenotypes and chromosomes are stored in ``coef/_jumps/_intsex``.
+
+```{r, eval=FALSE}
+coef_jumps_intdiet <- data.frame()
+for(i in 1:length(allcoef.intdiet)){
+  for (j in 1:19) {
+    point <- bayes_int(allscan1.intdiet[,i], chr = j)[1,2]
+    marker <- find_marker(allscan1.intdiet$map, chr = j, pos = point)
+    sort <- allcoef.intdiet[[i]][[j]]$coef[marker,13:19]
+    sort <- sort(sort)
+    for(k in 1:6){
+      dif <- sort[k+1] - sort[k]
+      if(dif > 2){
+        insert <- cbind(names(allcoef.add)[i], j, dif)
+        coef_jumps_intdiet <- rbind(coef_jumps_intdiet, insert)
+      }
+    }
+  }
+}
+```
+
+This chunk does the same as the last but for the diet interactive coefficient scan.  The phenotypes and chromosome are stored in ``coef_jumps_intdiet``.
+
+```{r, eval=FALSE}
+
+drops.intsex <- data.frame()
+for (i in 1:3) {
+  for (j in 1:128) {
+    for (k in 1:19) {
+      med_chr <- med_scans[[i]][[j]][[k]][which(med_scans[[i]][[j]][[k]][,3] == as.character(k)),]
+      dif <- mean(med_scans[[i]][[j]][[k]][,9]) - min(med_chr[,9])
+      if(dif > 3){
+        insert<- cbind(names(med_scans)[i], names(med_scans[[i]])[j], 
+             names(med_scans[[i]][[j]])[k], dif, 
+             med_chr[grep(min(med_chr[,9]), med_chr[,9]),2])
+        drops.intsex <- rbind(drops.intsex, insert)
+      }
+    }
+  }
+}
+```
+
+This last chunk requires a list of mediation scans, with the format being med_scans$typeOfTest$phenotype$chromosome, the types of test normally being additive and interactive for sex and diet.  The first for loop can be changed to look at one test specifically, by changing the 1:3 to 2, or can go through each test.

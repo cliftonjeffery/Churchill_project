@@ -1,0 +1,314 @@
+---
+title: "tests"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r, message=FALSE}
+library(ggplot2)
+library(corrplot)
+library(plyr)
+library(dplyr)
+library(pvclust)
+library(devtools)
+```
+
+This code gives a series of correlation and linear model tests for an initial look at the phenotypes and their relationships to Sex and Diet.
+
+```{r}
+my.data <- read.csv('~/Desktop/Rstudio/Churchill_project/Data/data_restructured.csv',header=T)
+```
+
+Firstly, load in the data, in this case the phenotype data for the mice.  
+
+```{r, warning=FALSE}
+my.data[,c(4,7,9:136)] <- as.data.frame(matrix(as.numeric(as.matrix(my.data[,c(4,7,9:136)])), nrow=nrow(my.data[,c(4,7,9:136)])))
+```
+
+We then have to reformat the data so that it is easier to interact with.  This just reformats the important variables, specifically the phenotype information and Sex and Diet.
+
+```{r}
+my.data$urine.microalbumin1 <- as.numeric(as.character(my.data$urine.microalbumin1))
+```
+
+urine.microalbumin1 is non-numeric in our data, so we had to change it.
+
+```{r}
+#Find all phenotypes that have a .05 p-value with Sex, Diet, or the interaction term
+
+#Significant####################
+
+#Variable Values
+pvalue_threshold <- .05
+tData <- my.data
+################################
+
+significant <- data.frame()
+for (i in (grep("Coat.Color", colnames(tData))+1):ncol(tData)) {
+  #Finding linear models for all the variables influence on a phenotype and various subsets of the variables
+  test1 <- lm(tData[,i]~tData$Sex+tData$Diet+tData$Gen + tData$parity)
+  test2 <- lm(tData[,i]~tData$Sex+tData$Gen + tData$parity)
+  test3 <- lm(tData[,i]~tData$Diet+tData$Gen + tData$parity)
+  test4 <- lm(tData[,i]~tData$Gen + tData$parity)
+  test5 <- lm(tData[,i]~tData$Sex*tData$Diet + tData$Sex + tData$Diet + tData$Gen + tData$parity)
+  test6 <- lm(tData[,i]~tData$Sex+tData$Diet+tData$Gen)
+  #tests for na
+  if(!is.na(anova(test1, test2)[2,6]) & !is.na(anova(test1, test3)[2,6]) & !is.na(anova(test1, test5)[2,6] < .05)){
+    #tests if p-value is significant
+    if(anova(test1, test2)[2,6] < pvalue_threshold | anova(test1, test3)[2,6] < pvalue_threshold | anova(test1, test5)[2,6] < pvalue_threshold | anova(test1, test6)[2,6] < pvalue_threshold){
+      #create dataframe of p-values for the influence of just sex, just diet, etc. on the phenotype
+      insert <- cbind(colnames(tData[i]), anova(test1, test2)[2,6], anova(test1, test3)[2,6], anova(test1, test5)[2,6], anova(test1, test6)[2,6], i, colnames(data)[i])
+      significant=rbind(significant, insert)
+    }
+  }
+}
+```
+
+This for loop will go through each phenotype and fit various linear mdels to it, and then make comparisons between the tests using analysis of variance to see how much more predictive one model is than another.  Test 1 is our baseline test, while comparing it to test 2 gives us the effect of Diet, to test 3 gives us the effect of Sex, test 4 gives us the effect of Sex + Diet, test 5 the effect of Sex * Diet, and test 6 the effects of parity. The results are stored in significant.  The p-value threshold I started out with is 0.05, but can easily be changed at the top.  The data can also be changed, though the for loop will have to be changed as well because it is tailored to our dataset.
+
+```{r}
+#allCorr####################
+
+#Variable Values
+sig_corr <- .3
+tData <- my.data
+############################
+
+#Correlate everything together
+allCorr <-data.frame()
+#leaving out generaion, coat color, and sample
+for(i in c(grep("Sex", colnames(tData)),grep("Diet", colnames(tData)),grep("ACR1", colnames(tData)):dim(tData)[2])){
+  for(j in c(grep("Sex", colnames(tData)),grep("Diet", colnames(tData)),grep("ACR1", colnames(tData)):dim(tData)[2])){
+    #Eliminates duplicate entries
+    if (i < j){
+      #find the correlation between all variables in dataset
+      mycor <- cor(cbind(as.numeric(tData[,i]), as.numeric(tData[,j])), use = "pairwise.complete.obs")
+      if (!is.na(mycor[2,1])){
+        #If correlation coefficient above selected threshold, store value
+        if(as.numeric((mycor[2,1]) > sig_corr | as.numeric(mycor[2,1]) < -sig_corr) & as.numeric(mycor[2,1]) != 1){
+          insert <- cbind(colnames(tData[i]), colnames(tData[j]), mycor[2,1])
+          allCorr <- rbind(allCorr, insert)
+        }
+      }
+    }
+  }
+}
+```
+
+At one point I was trying to create code that just found which phenotypes were correlated to sex or diet, but I was getting some strange results, so I instead decided to change tactics and find the correlation between every phenotype as well as Sex and Diet, which can then be searched.  This loop only stores phenotypes with a correlation above 0.3, though that can be easily changed at the beginning of the code.
+
+```{r}
+#betterCorr#########################
+
+#Variable Values
+phenotype <- "Sex" #Case sensitive
+####################################
+
+#Find all significant variables related to a certain phenotype
+betterCorr <- data.frame()
+#Check each correlation
+for (i in 1:dim(allCorr)[1]){
+  #if input variable is in entry and the phenotype it is correlated to has
+  #a significant p-value in one of the three tests done in the first loop
+  if((allCorr[i,1] == phenotype | allCorr[i,2] == phenotype) && (length(grep(allCorr[i,2], significant[,1])) != 0)){
+    #Add this correlation value to a data-frame
+    insert <- cbind(toString(allCorr[i,2]), toString(allCorr[i,3]), toString(significant[grep(allCorr[i,2], significant[,1]),2]))
+    betterCorr <- rbind(betterCorr, insert)
+  }
+}
+```
+
+When searching in the correlations, it is easy to find correlation values for Sex and Diet using a which statement, but if you're looking for other phenotypes it might be harder to find all of them, because some will be in the first and some in the second column, so this for loop makes that less of a problem.  To change the correlation threshold, you weill have to change the value in allCorr and then rerun both of these codes.
+
+```{r}
+#Dendograms##############
+
+#Variable Inputs
+tData <- my.data
+#########################
+
+#Construct Dendograms from various subsets of phenotypes
+#find the phenotypes that are in the bettercorr
+index=as.numeric(match(as.character(betterCorr[,1]),as.character(names(tData))))
+cl.tData=tData[,index]
+distance=dist(t(cl.tData))
+#Set NA distance to maximum distance
+distance[which(is.na(distance))]=max(na.omit(distance))+1
+plot(hclust(distance), main="Sex-Correlated Phenotypes, Female, Non-Transformed")
+```
+
+This code chunk will produce dendograms of the phenotypes in your dataset, showing how related the different phenotypes are.  This code specifically looks at those phenotypes that are found using the betterCorr loop.  However, by changing index to the column indices of what ever phenotypes you want to look at, you can make dendograms for whichever phenotypes.
+
+```{r}
+#Easy Correlations#######
+cor(cbind(my.data[,"BW.4"], my.data[,"BW.24"]), use = "pairwise.complete.obs")
+```
+
+I pretty quickly stopped wanting to write correlation functions every time I wanted to compare phenotypes, expressions, principle components, etc., so I wrote this so that all that is necessary is to replace the two values within the cbind function.
+
+```{r}
+ggplot(my.data, aes(x = BW.4, y = BW.24, colour = Diet)) + geom_point()
+```
+
+We were also creating quite a few comparison graphs between phenotypes, so I created this quick code in which you can just plug in whatever phenotypes and get a comparison graph.
+
+```{r}
+#naList##################
+
+#Variable Inputs
+tData <- my.data
+#########################
+
+#Find number of NAs in dataset
+naList <- data.frame()
+for(i in 1:dim(tData)[2]){
+  #compare length of the variable to length of variable with NAs omitted
+  if((length(tData[,i]) - length(na.omit(tData[,i]))) != 0){
+    insert <- cbind(colnames(tData)[i], (length(tData[,i]) - length(na.omit(tData[,i]))))
+    naList <- rbind(naList, insert)
+  }
+}
+```
+
+We then worked on Principle Component Analysis, the first step of which was to clean the data by removing all the NAs.  To do this we removed the phenotypes that had more than 100 NAs, then removed the mice that still had NAs.  However, before doing this we had to find how many NAs were in each phenotype, using the code chunk shown above.
+
+```{r}
+rz.transform<-function(y) {
+  rankY=rank(y, ties.method="average", na.last="keep")
+  rzT=qnorm(rankY/(length(na.exclude(rankY))+1))  
+  rzT
+}
+
+for(i in 1:ncol(tData)){
+  tData[,i] <- rz.transform(tData[,i])
+}
+
+```
+
+We then rankZ transform the data for more accurate PCA, though after some analysis we found the difference between rankZ and non-rankZ transformed PCA was pretty small.
+
+```{r}
+#Principle Component Analysis####
+
+#Variable inputs
+na.thres <- 100
+tData <- my.data
+pc.thres <- 0.1
+#################################
+
+#find all phenotypes in naList with NAs more than na.thres
+ls <- subset(naList, as.numeric(as.character(naList[,2])) > na.thres)
+#Find indices for each of these phenotypes in data supplied
+index=as.numeric(match(as.character(ls[,1]),as.character(names(tData))))
+#remove these phenotypes from the dataset
+my.data.reduced <- tData[,-index]
+#remove any mice that still have NAs from the data
+my.data.reduced <- na.omit(my.data.reduced)
+#Run PCA using correlation
+pc <- princomp(x = my.data.reduced[, c((grep("Coat.Color", colnames(my.data.reduced))+1):dim(my.data.reduced)[2])], cor = TRUE)
+```                                             
+
+We then clean up all of the data, removing all of the NAs.  na.omit by default removes just the rows with NAs in them, so we have to remove the columns first through looking at our naList.  We then do the the principle component analysis, with cor = TRUE meaning that it uses te corelation matrix vs. the covariate matrix, a less accurate method.
+
+```{r}
+#Break up the components and find the base phenotypes
+pc.ld <- loadings(pc)
+pc.scores <- pc$scores
+#separate the first 4 components
+comp1 <- pc.ld[,1]
+comp2 <- pc.ld[,2]
+comp3 <- pc.ld[,3]
+comp4 <- pc.ld[,4]
+#find all phenotypes in these components with values > 0.1
+comp1.pheno <- subset(comp1, abs(comp1) > pc.thres)
+comp2.pheno <- subset(comp2, abs(comp2) > pc.thres)
+comp3.pheno <- subset(comp3, abs(comp3) > pc.thres)
+comp4.pheno <- subset(comp4, abs(comp4) > pc.thres)
+```
+
+We subsetted the principle component data into various categories for easier analysis later.  
+
+```{r}
+#add sex, diet, generation, and litter to scores data
+sex.scores <- my.data[as.numeric(rownames(pc.scores)),4]
+diet.scores <- my.data[as.numeric(rownames(pc.scores)),7]
+gen.scores <- my.data[as.numeric(rownames(pc.scores)),5]
+parity.scores <- my.data[as.numeric(rownames(pc.scores)),6]
+pc.scores <- cbind(pc.scores, sex.scores, diet.scores, gen.scores, parity.scores)
+pc.scores <- pc.scores[,c(68:71, 1:67)]
+colnames(pc.scores)[1:4] <- c("Sex", "Diet", "Gen", "parity")
+```
+
+I also wanted to add the covariate information to the PC scores so that they were together when I wanted to compare, for instance, PC1 and Diet.  
+
+```{r}
+#pc.Significant#################
+
+#Variable Values
+pvalue_threshold <- .05
+tData <- pc.scores
+################################
+
+pc.significant <- data.frame()
+for (i in 5:length(colnames(pc.scores))) {
+  #Finding linear models for all the variables influence on components
+  #1 is Sex, 2 is Diet, 3 is Generation, 4 is Parity
+  test1 <- lm(tData[,i]~tData[,1]+tData[,2]+tData[,3] + tData[,4])
+  test2 <- lm(tData[,i]~tData[,1]+tData[,3] + tData[,4])
+  test3 <- lm(tData[,i]~tData[,2]+tData[,3] + tData[,4])
+  test4 <- lm(tData[,i]~tData[,3] + tData[,4])
+  test5 <- lm(tData[,i]~tData[,1]*tData[,2] + tData[,1] + tData[,2] + tData[,3] + tData[,4])
+  test6 <- lm(tData[,i]~tData[,1]+tData[,2]+tData[,3])
+  #tests for na
+  if(!is.na(anova(test1, test2)[2,6]) & !is.na(anova(test1, test3)[2,6]) & !is.na(anova(test1, test5)[2,6] < .05)){
+    #tests if p-value is significant
+    if(anova(test1, test2)[2,6] < pvalue_threshold | anova(test1, test3)[2,6] < pvalue_threshold | anova(test1, test5)[2,6] < pvalue_threshold | anova(test1, test6)[2,6] < pvalue_threshold){
+      #create dataframe of p-values for the influence of just sex, just diet, etc. on the phenotype
+      insert <- cbind(anova(test1, test2)[2,6], anova(test1, test3)[2,6], anova(test1, test5)[2,6], anova(test1, test6)[2,6], i, colnames(tData)[i])
+      pc.significant <- rbind(pc.significant, insert)
+    }
+  }
+}
+#name columns
+colnames(pc.significant) <- c("Diet Test", "Sex Test", "Inter. Test", "Parity Test", "Index", "Component")
+```
+
+We then did the same significance tests that we did for the phenotypes, except we performed the tests with the principle components instead.  
+
+```{r}
+#pcCorr##################
+
+#Variable inputs
+phenotype <- "Diet"
+corr_threshold <- .4
+#########################
+
+pcCorr <- data.frame()
+#Find where in the dataframe the testing phenotype is
+index <- grep(phenotype, colnames(pc.scores))
+for (i in 5:length(colnames(pc.scores))) {
+  #find correlations between the phenotype and each component
+  cor <- cor(cbind(as.numeric(pc.scores[,index]), pc.scores[,i]), use = "pairwise.complete.obs")
+  #Check if NA
+  if (!is.na(cor[2,1])){
+    #Check if it has a significant p-value and correlation
+    if(cor[2,1] > corr_threshold && length(grep(i, pc.significant[,6])) != 0){
+      #Create dataframe
+      insert <- cbind(colnames(pc.scores)[i], cor[2,1])
+      pcCorr <- rbind(pcCorr, insert)
+    }
+  }
+}
+```
+
+Finally, we created code to find if any PCs were significantly correlated to Sex or Diet.  We found through this that besides PC1 and PC2, none of the Principle components really interacted with Diet or Sex at all.
+
+
+
+
+

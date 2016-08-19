@@ -1,0 +1,103 @@
+---
+title: "PCA_script"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is code to enable easy PCA analysis of phenotype data.  It will clean the data, all that is required are the below parameters:
+
+```{r, message=FALSE}
+devtools::install_github("vqv/ggbiplot")
+library(ggbiplot)
+```
+
+First, we have to load in ggbiplot for our eventual PCA plot.
+
+```{r, message=FALSE}
+setwd("~/Desktop/Rstudio")
+pheno.data <- read.csv('Churchill_project/Data/svenson.phenotypes.final.850.csv',header=T)
+na.thres <- 100
+princomps <- c(1,2)
+```
+
+
+-the setwd function declares the location where the data you want to perform PCA on resides.  
+-pheno.data is a dataframe with phenotypes in the columns and mice in the rows.  It can be assigned either through the use of a read function, reading the data from an outside source, or as a dataframe already loaded into R, perhaps through loading an Rdata file.  
+-The na.thres value is for data cleaning.  PCA analysis can only be performed on data without any missing data, and so some phenotypes and some mice will often have to be removed from the data.  Our process first removes any phenotypes with a number of NAs above na.thres, then remove all mice that still have NA values.
+-princomps chould be assigned with a list of two numbers, which are the principle components that you would like to consider.
+
+```{r, message=FALSE}
+pheno.data.rm <- data.frame()
+for(i in 1:ncol(pheno.data)){
+  if((length(pheno.data[,i]) - length(na.omit(pheno.data[,i]))) > na.thres){
+    pheno.data.rm <- rbind(pheno.data.rm, i)
+  }
+}
+
+pheno.data <- pheno.data[,-unlist(pheno.data.rm)]
+pheno.data <- na.omit(pheno.data)
+```
+
+This for loop goes through each phenotype and finds how many NAs are in each.  It then creates a list of the indices of these phenotypes, and removes those phenotypes.  It then removes all mice that still have NAs. 
+
+```{r, message=FALSE}
+sex_by_diet <- c()
+for(i in 1:nrow(pheno.data)){
+  sex_by_diet <- c(sex_by_diet, 
+                   paste(pheno.data[i,grep("Sex", colnames(pheno.data), ignore.case = TRUE)], 
+                         pheno.data[i,grep("Diet", colnames(pheno.data), ignore.case = TRUE)], 
+                         sep = "_"))
+}
+```
+
+To show the interaction of sex and diet, we have to concatenate the Sex value and the Diet value, so that we have four possible groups.  This is not case sensitive.  To change the groups, simply change the terms inside grep(), for instance change Diet to Age.
+
+```{r, message=FALSE, warning=FALSE}
+for(i in 1:ncol(pheno.data)){
+  pheno.data[,i] <- as.numeric(as.character(pheno.data[,i]))
+}
+```
+
+This for loop makes sure that all of the data in pheno.data is numeric.
+
+```{r, message=FALSE}
+rz.transform<-function(y) {
+  rankY=rank(y, ties.method="average", na.last="keep")
+  rzT=qnorm(rankY/(length(na.exclude(rankY))+1))  
+  rzT
+}
+
+pheno.data <- pheno.data
+for(i in 1:ncol(pheno.data)){
+  pheno.data[,i] <- rz.transform(pheno.data[,i])
+}
+```
+
+To make sure that the Principle Component Analysis is easily understood, rank z transformation is performed on the data.
+
+```{r, message=FALSE}
+pheno.data <- t(na.omit(t(pheno.data)))
+```
+
+This omits all the non-numeric phenotypes, for instance Sex, Diet, Gen, etc.
+
+```{r}
+dim(pheno.data)
+```
+
+Check the dimensions of pheno.data to see how many phenotypes and mice have been removed.
+
+```{r, message=FALSE}
+pc <- princomp(pheno.data)
+```
+
+We finally have the data in a position to run the principle component analysis.
+
+```{r ggbiplot, fig.width=10, fig.height=7.5, message=FALSE}
+ggbiplot(pc, choices = princomps, circle = TRUE, ellipse = TRUE, groups = sex_by_diet)
+```
